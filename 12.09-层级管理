@@ -1,0 +1,110 @@
+LayerRoot:
+import GameConfig from "../../GameConfig";
+
+/**
+ * 层级管理
+*/
+export default class LayerRoot extends Laya.Sprite {
+    private static _instance: LayerRoot;
+    static get Instance(): LayerRoot {
+        if (!this._instance) this._instance = new LayerRoot();
+        return this._instance;
+    }
+
+    /**场景层 */
+    private sceneLayer: Laya.Box;
+    /**层 */
+    private dialogLayer: Laya.Box;
+    private guideLayer: Laya.Box;
+    private loadingLayer: Laya.Box;
+    private sdkLayer: Laya.Box;
+
+    constructor() {
+        super();
+        this.sceneLayer = this.createSceneLayer();
+        this.dialogLayer = this.createDialogLayer();
+        this.guideLayer = this.createGuideLayer();
+        this.loadingLayer = this.createLoadingLayer();
+        this.sdkLayer = this.createSdkLayer();
+    }
+
+    private createSceneLayer() {
+        var box = new Laya.Box();
+        box.width = Laya.stage.width;
+        box.height = Laya.stage.height;
+        Laya.stage.addChild(box);
+        box.addChild(Laya.Scene.root);
+        return box;
+    }
+
+    private createDialogLayer() {
+        var box = new Laya.Box();
+        Laya.stage.addChild(box);
+        box.addChild(Laya.Dialog.manager);
+        return box;
+    }
+
+    private createGuideLayer() {
+        var box = new Laya.Box();
+        box.mouseEnabled = true;
+        box.name = "GuideLayer";
+        Laya.stage.addChild(box);
+        return box;
+    }
+
+    private createLoadingLayer() {
+        var box = new Laya.Box();
+        box.mouseEnabled = false;
+        box.name = "LoadingLayer";
+        Laya.stage.addChild(box);
+        return box;
+    }
+
+    private createSdkLayer() {
+        var box = new Laya.Box();
+        box.mouseEnabled = false;
+        box.name = "SdkLayer";
+        Laya.stage.addChild(box);
+        return box;
+    }
+
+    public openScene(scene?: string, closeOther?: boolean, param?: any, complete?: Laya.Handler, progress?: Laya.Handler) {
+        scene && Laya.Scene.open(scene, closeOther, param, complete, progress);
+    }
+    public closeScene(scene?: string, name?: string) {
+        scene && Laya.Scene.close(scene, name);
+    }
+    public openView(view: Laya.Sprite, type: LayerType = LayerType.SCENE) {
+        let layer = this.sceneLayer;
+        switch (type) {
+            case LayerType.SCENE:
+                layer = this.sceneLayer;
+                break;
+            case LayerType.Dialog:
+                layer = this.dialogLayer;
+                break;
+        }
+        layer.addChild(view);
+    }
+
+    addToSceneLayer(view: Laya.Sprite) {
+        this.sceneLayer.addChild(view);
+    }
+
+    addToGuideLayer(view: Laya.Sprite) {
+        this.guideLayer.addChild(view);
+    }
+
+    addToLoadingLayer(view: Laya.Sprite) {
+        this.loadingLayer.addChild(view);
+    }
+
+    addToSdkLayer(view: Laya.Sprite) {
+        this.sdkLayer.addChild(view);
+    }
+}
+
+export const enum LayerType {
+    SCENE = 0,
+    Dialog,
+}

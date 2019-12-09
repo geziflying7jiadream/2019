@@ -1,0 +1,562 @@
+import { MessageCenter } from "../game/core/MessageCenter";
+import { Log } from "../game/core/utility/Log";
+import { StringUtil } from "../game/core/basic/String";
+import { Dictionary } from "../game/core/utility/Dictionary";
+import { GameMessageType } from "../game/core/framework/GameMessageType";
+import { CoreFunction } from "../game/core/CoreFunction";
+import GameData from "../game/data/GameData";
+import SoundManager from "./SoundManager";
+import { AudioManager } from "./AudioManager";
+import { fs } from "./WxFileManager";
+import GameControl from "../game/script/GameControl";
+import LayerRoot from "../game/scene/LayerRoot";
+import Confings from "../game/data/Confings";
+
+
+export default class WxSDK {
+    private static _instance: WxSDK;
+    public static get Instance(): WxSDK {
+        if (!this._instance) this._instance = new WxSDK();
+        return this._instance;
+    }
+
+    sharing = false;
+
+    public init() {
+        if (!Laya.Browser.window.wx) return;
+        this.onMemoryWarning();
+        //回到前台
+        wx.onShow((res) => {
+            // Laya.timer.once(1000, this, () => {
+            MessageCenter.Instance.dispatch(GameMessageType.NOTICE_WX_ONSHOW, res);
+            // });
+            AudioManager.Instance.playBgm();
+            doOnshow(res);
+            Log.trace("[ON_SHOW]:", res);
+        });
+        //回到后台
+        wx.onHide(() => {
+            GameData.Instance.upload();
+            GameControl.Instance && GameControl.Instance.pauseGame();
+            Log.trace("[ON_hide]");
+        });
+        //保持屏幕常亮
+        wx.setKeepScreenOn({ keepScreenOn: true });
+        doLaunchOption();
+        return;
+        function doLaunchOption() {
+            //从收藏小程序进入
+            var addprogram = GameData.Instance.addProgramReward;
+            var launchOption = WxSDK.Instance.launchOption;
+            if (!addprogram && launchOption.scene == 1131) {
+                GameData.Instance.addProgramReward = 1;
+                LayerRoot.Instance.openScene("dialog/AddProgramAlertDialog.scene", false, { title: "道具奖励", count: 1 });
+                DDSDK.logEvent("addprogramsuc", {});
+            }
+            //订阅中进入
+            var subscribe = GameData.Instance.subscribeReward;
+            if (!subscribe && launchOption.scene == 1014) {
+                GameData.Instance.subscribeReward = 1;
+                LayerRoot.Instance.openScene("dialog/AddProgramAlertDialog.scene", false, { title: "订阅奖励", count: 2 });
+                DDSDK.logEvent("subscribesuc", {});
+            }
+        }
+        function doOnshow(res) {
+            //从收藏小程序进入
+            var addprogram = GameData.Instance.addProgramReward;
+            if (!addprogram && res.scene == 1131) {
+                GameData.Instance.addProgramReward = 1;
+                LayerRoot.Instance.openScene("dialog/AddProgramAlertDialog.scene", false, { title: "道具奖励", count: 1 });
+                DDSDK.logEvent("addprogramsuc", {});
+            }
+            //订阅中进入
+            var subscribe = GameData.Instance.subscribeReward;
+            if (!subscribe && res.scene == 1014) {
+                GameData.Instance.subscribeReward = 1;
+                LayerRoot.Instance.openScene("dialog/AddProgramAlertDialog.scene", false, { title: "订阅奖励", count: 2 });
+                DDSDK.logEvent("subscribesuc", {});
+            }
+        }
+    }
+    public setOnHide(callback: Function) {
+        if (!Laya.Browser.window.wx) return;
+        wx.onHide(callback);
+    }
+    private _launchOption: IWxLaunchOption;
+    private _fs: IWxFileSystemManager;
+    private _WX_ROOT: string = "";
+    public get WX_ROOT() {
+        if (!Laya.Browser.window.wx) return;
+        if (!this._WX_ROOT) this._WX_ROOT = wx.env.USER_DATA_PATH;
+        return this._WX_ROOT;
+    }
+    /**获取场景值 */
+    public get launchOption() {
+
+        if (!Laya.Browser.window.wx) return;
+        if (!this._launchOption) {
+            this._launchOption = wx.getLaunchOptionsSync();
+            Log.trace("[launchOption]:", this._launchOption)
+        }
+        return this._launchOption;
+    }
+    public get inviteid(): string {
+        var launchOption = this.launchOption;
+        if (launchOption && launchOption.query && launchOption.query.inviteid) {
+            return launchOption.query.inviteid
+        }
+        return null;
+    }
+    public get inviteopenid(): string {
+        var launchOption = this.launchOption;
+        if (launchOption && launchOption.query && launchOption.query.inviteopenid) {
+            return launchOption.query.inviteopenid
+        }
+        return null;
+    }
+    public get invitetype(): string {
+        var launchOption = this.launchOption;
+        if (launchOption && launchOption.query && launchOption.query.invitetype) {
+            return launchOption.query.invitetype
+        }
+        return null;
+    }
+    public get channel(): string {
+        var launchOption = this.launchOption;
+        let channel = launchOption.query && launchOption.query.channel ? launchOption.query.channel : null;
+        return channel;
+    }
+    public get mp(): string {
+        var launchOption = this.launchOption;
+        let mp = launchOption.query && launchOption.query.mp ? launchOption.query.mp : null;
+        return mp;
+    }
+
+    /**加载分包 */
+    public loadSubpackage(name: string, complete: Laya.Handler) {
+        if (!Laya.Browser.onWeiXin) {
+            complete && complete.run();
+            return;
+        }
+
+        const loadTask = wx.loadSubpackage({
+            name,
+            success: function (res) {
+                Log.trace(`分包${name}加载成功！`);
+                complete && complete.run();
+            },
+            fail: function (res) {
+                Log.trace(`分包${name}加载失败！`);
+            }
+        })
+
+        loadTask.onProgressUpdate(res => {
+            Log.trace('下载进度', res.progress)
+            Log.trace('已经下载的数据长度', res.totalBytesWritten)
+            Log.trace('预期需要下载的数据总长度', res.totalBytesExpectedToWrite)
+        })
+    }
+
+    public shareAppMessage(title, imageUrl, query?: any, handler?: Laya.Handler) {
+        Log.trace(">>>>>>> shareAppMesage <<<<<<< ");
+        Log.trace("   title: " + imageUrl);
+        if (query) Log.trace("   query: " + query);
+        else {
+            query = `inviteopenid=${GameData.Instance.openid}`;
+        }
+        this.sharing = true;
+        DDSDK.ShareAppMessage({
+            title: title,
+            imageUrl: imageUrl,
+            query: query,
+            success: function (res) {
+                Log.trace("------ shareAppMessage ok.");
+            },
+            fail: function (res) {
+                Log.trace("------ shareAppMessage failed, res: " + JSON.stringify(res));
+            },
+            complete: function (res) {
+                Log.trace("------ shareAppMessage complete, res: " + JSON.stringify(res));
+                let shareTickets = res.shareTickets;
+                if (shareTickets && shareTickets[0]) res['shareTicket'] = shareTickets[0];
+                if (handler) handler.runWith(res);
+                this.sharing = false;
+            },
+            cancel: function (res) {
+                Log.trace("------ shareAppMessage cancel, res: ", res);
+                res.canceled = true;
+                if (handler) handler.runWith(res);
+                this.sharing = false;
+            }
+        });
+    }
+
+    private bannerAd: IWxBannerAd;
+    public showBannerAd(adUnitId) {
+        if (this.getSDKVersion() < 204) {
+            CoreFunction.tipMsg("微信版本过低，不能显示广告");
+            return;
+        }
+
+        this.sharing = true;
+        Log.trace("[adUnitId:]", adUnitId);
+        let bannerAd: IWxBannerAd = this.bannerAd;
+        let canvas = window["canvas"];
+        let canvasWidth = parseInt(canvas.style.width);
+        let canvasHeight = parseInt(canvas.style.height);
+        if (!bannerAd) {
+            let style = {
+                left: 0,
+                top: canvasHeight - 140,
+                width: canvasWidth,
+                height: 100
+            };
+            Log.trace("[style:]", style);
+            bannerAd = this.bannerAd = wx.createBannerAd({
+                adUnitId, style
+            });
+        }
+
+        bannerAd.onError((errorData) => {
+            Log.trace('onError:' + JSON.stringify(errorData));
+            this.sharing = false;
+        })
+
+        this.bannerAd.onResize(resize => {
+            Log.trace('onResize:' + JSON.stringify(resize));
+            let top = canvasHeight - resize.height;
+            if (CoreFunction.isIphoneX()) {
+                top = canvasHeight - resize.height - 30;
+            }
+            this.bannerAd.style.top = top;
+        });
+
+        bannerAd.onLoad(() => {
+            Log.trace('onLoad');
+        });
+        bannerAd.show();
+        Log.trace("bannerAd显示");
+
+    }
+    public hideBannerAd() {
+        if (this.bannerAd != null) {
+            Log.trace("bannerAd关闭");
+            this.bannerAd.hide();
+            this.bannerAd.offError(null);
+            this.bannerAd.offResize(null);
+            this.bannerAd.offLoad(null);
+            this.bannerAd.destroy();
+            this.bannerAd = null;
+        }
+        this.sharing = false;
+    }
+
+    private rewardAdDic: { [adUnitId: string]: IWxRewardedVideoAd } = {};
+    public showRewardAd(adUnitId, closeHanlder: Laya.Handler, errorHanlder: Laya.Handler) {
+        var rewardAd = this.rewardAdDic[adUnitId];
+        if (!rewardAd) {
+            rewardAd = this.rewardAdDic[adUnitId] = wx.createRewardedVideoAd({ adUnitId: adUnitId, multiton: true });
+        }
+
+        this.sharing = true;
+        rewardAd.load().then(() => {
+            rewardAd.show();
+        }).catch(e => {
+            Log.trace("[showRewardAd load]: ERROR");
+            if (errorHanlder) errorHanlder.run();
+        })
+        var closeCallback = (res) => {
+            if (closeHanlder) closeHanlder.runWith(res.isEnded);
+            AudioManager.Instance.playBgm();
+            rewardAd.offClose(closeCallback);
+            rewardAd.offError(errorCallback);
+            Log.trace("[closeCallback]:", res);
+            this.sharing = false;
+        };
+        var errorCallback = (res) => {
+            Log.trace("[errorCallback]: ERROR");
+            if (errorHanlder) errorHanlder.run();
+            rewardAd.offClose(closeCallback);
+            rewardAd.offError(errorCallback);
+            this.sharing = false;
+        };
+        rewardAd.onClose(closeCallback);
+        rewardAd.onError(errorCallback);
+    }
+
+    vibrateShort() {
+        if (!Laya.Browser.onWeiXin) return;
+        wx.vibrateShort({})
+    }
+
+    vibrateLong() {
+        if (!Laya.Browser.onWeiXin) return;
+        wx.vibrateLong({})
+    }
+
+    public download(url, folder, res_name, callBack) {
+        if (!Laya.Browser.onWeiXin) return;
+        this.fileRemove(folder, () => {
+            Log.trace("下载链接:" + url);
+            var nativePath = `${this.WX_ROOT}/${folder}/${res_name}`;//本地文件路径
+            Log.trace("nativePath:" + nativePath);
+            var unzipPath = this.WX_ROOT + "/" + folder;//解压路径
+            Log.trace("unzipPath:" + unzipPath);
+            var downLoadTask = wx.downloadFile({
+                url: url,
+                header: {},
+                filePath: nativePath,
+                success: (res) => {
+                    Log.trace(JSON.stringify(res));
+                    let fs = this.getFileManager();
+                    Log.trace("zipFilePath:" + nativePath);
+                    Log.trace("targetPath:" + unzipPath);
+                    fs.unzip({
+                        zipFilePath: nativePath,
+                        targetPath: unzipPath,
+                        success: (res) => {
+                            Log.trace("targetPath:" + unzipPath);
+                            Log.trace("解压成功:" + res_name);
+                            //删除zip 
+                            fs.unlink({
+                                filePath: nativePath,
+                                success: () => {
+                                    Log.trace("删除成功:" + res_name);
+                                }
+                            })
+
+                            callBack(true);
+                        },
+                        fail: (error) => {
+                            Log.trace("解压失败:" + JSON.stringify(error));
+                            Log.trace("zipFilePath:" + nativePath);
+                        }
+                    });
+                },
+                fail: (res) => {
+                    Log.trace(JSON.stringify(res));
+                    Log.trace("下载失败:" + url);
+                    callBack(false);
+                }
+            });
+        });
+    }
+
+
+    private fileRemove(dir, callback) {
+        //遍历删除所有文件 USER_DATA_PATH
+        let fileManager = this.getFileManager();
+        let root = this.WX_ROOT + (dir ? ("/" + dir) : "");
+        this.hasDirectory(dir, (bool) => {
+            let files = fileManager.readdirSync(this.WX_ROOT);
+            if (files) {
+                for (var k in files) {
+                    let fullPath = this.WX_ROOT + "/" + files[k];
+                    var stat;
+                    try {
+                        stat = fileManager.statSync(fullPath);
+                    } catch (e) {
+                        Log.trace(e);
+                        continue;
+                    }
+                    if (stat.isDirectory()) {
+                        if (files[k] == "layaairGame" || files[k] == "miniprogramLog") continue;
+                        fs.remove("/" + files[k]);
+                    } else {
+                        fileManager.unlinkSync(fullPath);
+                    }
+                }
+            }
+            if (!bool) {
+                fileManager.mkdirSync(root);
+            }
+            if (callback) callback();
+        })
+    }
+    public downloadFile(url, root, name, callBack) {
+        Log.trace("下载链接:" + url);
+        var nativePath = `${this.WX_ROOT}/${root}/${name}`;
+        Log.trace("nativePath:" + nativePath);
+        var downLoadTask = wx.downloadFile({
+            url: url,
+            header: {},
+            filePath: nativePath,
+            success: (res) => {
+                Log.trace(JSON.stringify(res));
+                callBack(true);
+            },
+            fail: (res) => {
+                Log.trace(JSON.stringify(res));
+                Log.trace("下载失败:" + url);
+                callBack(false);
+            }
+        });
+    }
+
+    public hasDirectory(dirName, callback) {
+        var fs = this.getFileManager();
+        var allPath = `${this.WX_ROOT}/${dirName}`;
+        fs.access({ path: allPath, success: () => { callback(true) }, fail: () => { callback(false) } });
+    }
+    public hasFile(url, callback) {
+        var fs = this.getFileManager();
+        var allPath = `${this.WX_ROOT}/${url}`;
+        fs.access({ path: allPath, success: () => { callback(true) }, fail: () => { callback(false) } });
+    }
+    public mkdirSync(dirName) {
+        var fs = this.getFileManager();
+        fs.mkdirSync(`${this.WX_ROOT}/${dirName}`);
+    }
+    public getFileManager() {
+        if (!this._fs) this._fs = wx.getFileSystemManager();
+        return this._fs;
+    }
+    private sdkVersion = null;
+
+    public getSDKVersion() {
+        if (this.sdkVersion == null) {
+            let sysInfo = wx.getSystemInfoSync();
+            let sdkVersion = sysInfo.SDKVersion;
+            sdkVersion = sdkVersion.replace(/\./g, "");
+            sdkVersion = sdkVersion.substr(0, 3);
+            let sdkVersionNum = parseInt(sdkVersion);
+            this.sdkVersion = sdkVersionNum;
+            Log.trace("wxSDK:" + sdkVersionNum);
+        }
+        return this.sdkVersion;
+    }
+
+    private openDataContext: any;
+
+    /** 云托管游戏数据 */
+    public setUserCloudStorage() {
+        if (!Laya.Browser.onWeiXin) return;
+        let userData = GameData.Instance.userData;
+        wx.setUserCloudStorage(
+            { KVDataList: [{ key: "guanka", value: (userData.guanka) + "" }] }
+        );
+    }
+    /** 订阅 */
+    public requestSubscribeMessage(tmplIds: any[], success, fail) {
+        if (this.getSDKVersion() < 282) {
+            CoreFunction.tipMsg("微信版本过低，不能显示广告");
+            return;
+        }
+        if (!Laya.Browser.onWeiXin) return;
+        wx.requestSubscribeMessage({ tmplIds, success, fail });
+    }
+    public createUserInfoButton(target: Laya.Image, cb: Laya.Handler) {
+
+        let left, top, width, height;
+        //等待布局完成
+        Laya.timer.once(200, this, () => {
+            let shareCfg = Confings.Instance.getAppCfg();
+            let uInfo = GameData.Instance.userInfo;
+            if (!Laya.Browser.onWeiXin || uInfo || !shareCfg || !shareCfg.getuserinfo) {
+                cb && cb.run();
+                return;
+            }
+            let point = Laya.Point.create();
+            point.setTo(target.x, target.y);
+            (target.parent as Laya.Sprite).localToGlobal(point, false);
+            let systemInfo = wx.getSystemInfoSync();
+            let pixelRatioX = systemInfo.windowWidth / Laya.stage.displayWidth;
+            let pixelRatioY = systemInfo.windowHeight / Laya.stage.displayHeight;
+            left = point.x * pixelRatioX;
+            top = point.y * pixelRatioY;
+            width = target.width * pixelRatioX;
+            height = target.height * pixelRatioY;
+            let withCredentials = true;
+            let style = { left, top, width, height } as IWxButtonStyle;
+            let button = wx.createUserInfoButton({
+                withCredentials
+                , style
+                , type: "image"
+                , text: ""
+                , image: "loading/login.png"
+            });
+            button.onTap(res => {
+                Log.trace("[UserInfo]:", res);
+                if (res.errMsg == "getUserInfo:ok") {
+                    if (res.userInfo && !uInfo) {
+                        GameData.Instance.userInfo = res.userInfo;
+                        GameData.Instance.upload();
+                    }
+                    DDSDK.logEvent("shouquansuccess", {});
+                } else {
+                    DDSDK.logEvent("shouquanfail", {});
+                }
+                cb && cb.run();
+                button.hide();
+            });
+            button.show();
+        });
+    }
+    public checkForUpdate() {
+        if (!Laya.Browser.onWeiXin) return;
+        let updateManager = wx.getUpdateManager();
+        updateManager.onCheckForUpdate(res => {
+            if (res.hasUpdate) {
+                updateManager.onUpdateReady(() => {
+                    Log.trace('下载更新包成功');
+                    updateManager.applyUpdate();
+                });
+                updateManager.onUpdateFailed(() => { Log.trace('下载更新包失败'); });
+            } else {
+                Log.trace('[checkForUpdate]:当前为最新版本');
+            }
+        })
+    }
+    public onMemoryWarning() {
+        if (!Laya.Browser.onWeiXin) return;
+        wx.onMemoryWarning(function (res) {
+            console.warn('[onMemoryWarningReceive]');
+            WxSDK.Instance.triggerGC();
+        })
+    }
+    public triggerGC() {
+        // let loadmap = Laya.Loader.loadedMap;
+        // for (const key in loadmap) {
+        //     if (loadmap.hasOwnProperty(key)) {
+        //         const element = loadmap[key];
+        //         if(element && element instanceof Laya.Texture){
+        //             if(element["_referenceCount"] == 0)
+        //                 // Laya.Loader.clearRes(key);
+        //                 Laya.Loader.clearTextureRes(key);
+        //         }
+        //     }
+        // }
+        // let pool = Laya.Pool['_poolDic'];
+        // for(var key in pool){
+        //     const element:any[] = pool[key];
+        //     if(element && element.length > 5){
+        //         element.splice(5,element.length - 5);
+        //     }
+        // }
+        // if(!Laya.Browser.onWeiXin)return;
+        console.warn('[triggerGC]');
+        wx.triggerGC();
+    }
+
+    public showModel(title, content, showCancel, successCB?: Laya.Handler) {
+        if (!Laya.Browser.onWeiXin) return;
+        wx.showModal({
+            title,
+            content,
+            showCancel,
+            success(res) {
+                if (res.confirm) {
+                    successCB && successCB.run();
+                } else if (res.cancel) {
+
+                }
+            }
+        })
+    }
+
+    public exitMiniProgram() {
+        if (!Laya.Browser.onWeiXin) return;
+        wx.exitMiniProgram({});
+        console.log("exitMiniProgram");
+    }
+}
